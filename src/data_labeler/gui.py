@@ -14,6 +14,8 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from PyQt5 import QtWidgets, QtCore
 plt.use('Qt5Agg')
 
+from scipy.signal import find_peaks
+
 PADDING = 1000
 
 class MplCanvas(FigureCanvasQTAgg):
@@ -102,6 +104,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Matplotlib canvas for the Th 1 signal
         self.canvas_th_1 = MplCanvas(self, width, height)
         self.line_th_1, = self.canvas_th_1.axes.plot([], [], linewidth=0.8, color='blue')
+
+        self.neighborhood_patches_th1 = []
 
         self.canvas_th_1.axes.text(0.01, 0.95, 'Th 1 Filtered', ha='left', va='top', color='blue', fontsize = 10, transform=self.canvas_th_1.axes.transAxes)
         layout.addWidget(self.canvas_th_1, 21, 0, 10, 10)
@@ -283,6 +287,48 @@ class MainWindow(QtWidgets.QMainWindow):
                                                alpha=0.7,
                                                edgecolor='none')
 
+    def update_th1_neighborhoods(self, x, start, end, neighborhood_size=15, separation=1):
+        ref_data_segment = self.DATA['Th_Ref_Filt'][start:end].to_numpy()
+        if (len(ref_data_segment) == 0):
+            n = 0
+        else:
+            ref_dips_indices, _ = find_peaks(-ref_data_segment, distance=self.FS*2)
+            n = len(ref_dips_indices)
+        
+        for patch in self.neighborhood_patches_th1:
+            patch.remove()
+        self.neighborhood_patches_th1 = []
+        
+        data_segment = self.DATA['Th1_Filt'][start:end].to_numpy()
+        if (len(data_segment) == 0):
+            return
+        
+        minima_indices, _ = find_peaks(-data_segment, distance=self.FS*separation)
+        if (len(minima_indices) == 0):
+            return
+        
+        minima_values = data_segment[minima_indices]
+        sorted_minima_indices = np.argsort(minima_values)
+
+        how_many_plots = min(n, len(sorted_minima_indices))
+
+        smallest_minima_values = minima_values[sorted_minima_indices[:how_many_plots]]
+
+        colors = ['yellow', 'orange', 'red']
+        for i, min_value in enumerate(smallest_minima_values):
+            patch_start = min_value - neighborhood_size / 2
+            patch_end = min_value + neighborhood_size / 2
+
+            patch = self.canvas_th_1.axes.axhspan(
+                patch_start,
+                patch_end,
+                color=colors[i%len(colors)],
+                alpha=0.25,
+                zorder=0
+                )
+
+            self.neighborhood_patches_th1.append(patch)
+
     #   Redraw all plots
     def update_plot(self):
         seg_len_pts = self.SEG_LEN * self.FS            # Length of a single segment in points
@@ -306,6 +352,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_limits(self.line_th_ref.axes, self.DATA['Th_Ref_Filt'], start, end, False)
         self.update_limits(self.line_th_1.axes, self.DATA['Th1_Filt'], start, end, False)
         self.update_limits(self.line_th_2.axes, self.DATA['Th2_Filt'], start, end, False)
+
+        self.update_th1_neighborhoods(x, start, end)
 
         # Update shading of expiratory and inspiratory phases
         self.update_shading(x, start, end)
