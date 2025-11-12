@@ -48,9 +48,9 @@ class MainWindow(QtWidgets.QMainWindow):
     
     #   Keypress eventhandler for navigating the ECG and respiratory signals
     def keyPressEvent(self, event):
-        if event.key() == QtCore.Qt.Key_Right:
+        if event.key() == QtCore.Qt.Key_W or event.key() == QtCore.Qt.Key_D:
             self.on_next()
-        elif event.key() == QtCore.Qt.Key_Left:
+        elif event.key() == QtCore.Qt.Key_S or event.key() == QtCore.Qt.Key_A:
             self.on_prev()
         elif event.key() == QtCore.Qt.Key_1:
             self.on_toggle(self.radio_ref_yes, self.radio_ref_no)
@@ -258,7 +258,8 @@ class MainWindow(QtWidgets.QMainWindow):
         inspiration_mask = (self.DATA[start:end]['Phase'] == 1)
         expiration_mask = (self.DATA[start:end]['Phase'] == 0)
 
-        self.line_th_ref.axes.patches.clear()
+        #self.line_th_ref.axes.patches.clear()
+        while self.line_th_ref.axes.patches: self.line_th_ref.axes.patches[0].remove()
 
         y_min, _ = self.line_th_ref.axes.get_ylim()
 
