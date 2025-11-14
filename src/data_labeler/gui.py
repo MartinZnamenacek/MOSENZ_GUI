@@ -105,10 +105,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas_th_1 = MplCanvas(self, width, height)
         self.line_th_1, = self.canvas_th_1.axes.plot([], [], linewidth=0.8, color='blue')
 
-        self.neighborhood_patches_th1 = []
-
         self.canvas_th_1.axes.text(0.01, 0.95, 'Th 1 Filtered', ha='left', va='top', color='blue', fontsize = 10, transform=self.canvas_th_1.axes.transAxes)
         layout.addWidget(self.canvas_th_1, 21, 0, 10, 10)
+
+        # Variables for Th1 semi-automatic annotation
+        self.neighborhood_patches_th1 = []
+        self.interval_vertical_stripes_th1 = []
+        self.correct_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='o', linestyle='None', color='green', markersize=7.5, zorder=50)
+        self.dangerous_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='X', linestyle='None', color='red', markersize=10, zorder=100)
 
         # Matplotlib canvas for the Th 2 signal
         self.canvas_th_2 = MplCanvas(self, width, height)
@@ -287,18 +291,15 @@ class MainWindow(QtWidgets.QMainWindow):
                                                alpha=0.7,
                                                edgecolor='none')
 
-    def update_th1_neighborhoods(self, x, start, end, neighborhood_size=15, separation=1):
+    def update_th1_semi_auto_annotations(self, x, start, end, patch_height_percentage = 0.05, reference_separation = 2, separation = 1, colors = ['C0', 'C1', 'C2'], interval_range_falloff = .25, epsilon = 0.25):
+        # --- SETUP ---
         ref_data_segment = self.DATA['Th_Ref_Filt'][start:end].to_numpy()
         if (len(ref_data_segment) == 0):
             n = 0
         else:
-            ref_dips_indices, _ = find_peaks(-ref_data_segment, distance=self.FS*2)
+            ref_dips_indices, _ = find_peaks(-ref_data_segment, distance=self.FS*reference_separation)
             n = len(ref_dips_indices)
-        
-        for patch in self.neighborhood_patches_th1:
-            patch.remove()
-        self.neighborhood_patches_th1 = []
-        
+
         data_segment = self.DATA['Th1_Filt'][start:end].to_numpy()
         if (len(data_segment) == 0):
             return
@@ -306,18 +307,65 @@ class MainWindow(QtWidgets.QMainWindow):
         minima_indices, _ = find_peaks(-data_segment, distance=self.FS*separation)
         if (len(minima_indices) == 0):
             return
-        
+        # --- END SETUP ---
+
+        # --- PLOTTING REFERENCE DIP INTERVAL RANGES ---
+        reference_minima_index_ranges = []
+        for ref_dip_idx in ref_dips_indices:
+            start_range = ref_dip_idx - int(self.FS * reference_separation * interval_range_falloff)
+            if (start_range < 0):
+                start_range = 0
+            end_range = ref_dip_idx + int(self.FS * reference_separation * interval_range_falloff)
+            if (end_range >= len(data_segment)):
+                end_range = len(data_segment) - 1       
+
+            reference_minima_index_ranges.append((start_range, end_range))
+
+        while self.interval_vertical_stripes_th1:
+            self.interval_vertical_stripes_th1.pop().remove()
+
+        for reference_range in reference_minima_index_ranges:
+            stripe = self.canvas_th_1.axes.axvspan(
+                x[reference_range[0]],
+                x[reference_range[1]],
+                color='lightgrey',
+                alpha=0.5,
+                zorder=0
+                )
+            
+            self.interval_vertical_stripes_th1.append(stripe)
+        # --- END PLOTTING REFERENCE DIP INTERVAL RANGES ---
+
+        # --- PLOTTING CRITICAL DIP POINTS ---
+        epsilon_y = epsilon * (np.max(data_segment) - np.min(data_segment))
+
+        correct_minima_indices = []
+        dangerous_minima_indices = []
+
+        smallest_minimum_y = np.min(data_segment[minima_indices])
+        for idx in minima_indices:
+            if (data_segment[idx] <= smallest_minimum_y + epsilon_y) and any(start_range <= idx <= end_range for (start_range, end_range) in reference_minima_index_ranges):
+                correct_minima_indices.append(idx)
+            else:
+                dangerous_minima_indices.append(idx)            
+
+        self.correct_dips_th1.set_data(x[correct_minima_indices], data_segment[correct_minima_indices])
+        self.dangerous_dips_th1.set_data(x[dangerous_minima_indices], data_segment[dangerous_minima_indices])
+        # --- END PLOTTING CRITICAL DIP POINTS ---
+
+        # --- PLOTTING NEIGHBORHOOD PATCHES/BARS ---
         minima_values = data_segment[minima_indices]
         sorted_minima_indices = np.argsort(minima_values)
 
-        how_many_plots = min(n, len(sorted_minima_indices))
+        while self.neighborhood_patches_th1:
+            self.neighborhood_patches_th1.pop().remove()
 
-        smallest_minima_values = minima_values[sorted_minima_indices[:how_many_plots]]
-
-        colors = ['yellow', 'orange', 'red']
-        for i, min_value in enumerate(smallest_minima_values):
-            patch_start = min_value - neighborhood_size / 2
-            patch_end = min_value + neighborhood_size / 2
+        ymin, ymax = self.line_th_1.axes.get_ylim()
+        patch_size = (ymax - ymin) * patch_height_percentage
+        n_patches = min(n, len(sorted_minima_indices))
+        for i, min_value in enumerate(minima_values[sorted_minima_indices[:n_patches]]):
+            patch_start = min_value - patch_size / 2
+            patch_end = min_value + patch_size / 2
 
             patch = self.canvas_th_1.axes.axhspan(
                 patch_start,
@@ -328,6 +376,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
 
             self.neighborhood_patches_th1.append(patch)
+        # --- END PLOTTING NEIGHBORHOOD PATCHES/BARS ---
 
     #   Redraw all plots
     def update_plot(self):
@@ -353,7 +402,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_limits(self.line_th_1.axes, self.DATA['Th1_Filt'], start, end, False)
         self.update_limits(self.line_th_2.axes, self.DATA['Th2_Filt'], start, end, False)
 
-        self.update_th1_neighborhoods(x, start, end)
+        # Update Th1 semi-automatic annotation
+        self.update_th1_semi_auto_annotations(x, start, end)
 
         # Update shading of expiratory and inspiratory phases
         self.update_shading(x, start, end)
