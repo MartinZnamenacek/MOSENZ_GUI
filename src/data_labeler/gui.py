@@ -16,6 +16,10 @@ plt.use('Qt5Agg')
 
 from scipy.signal import find_peaks
 
+from enum import Enum
+class AnnotationType(Enum):
+    TH1, TH2 = 1, 2
+
 PADDING = 1000
 
 class MplCanvas(FigureCanvasQTAgg):
@@ -291,38 +295,57 @@ class MainWindow(QtWidgets.QMainWindow):
                                                alpha=0.7,
                                                edgecolor='none')
 
-    def update_th1_semi_auto_annotations(self, x, start, end, patch_height_percentage = 0.05, reference_separation = 2, separation = 1, colors = ['C0', 'C1', 'C2'], interval_range_falloff = .25, epsilon = 0.25):
-        # --- SETUP ---
-        ref_data_segment = self.DATA['Th_Ref_Filt'][start:end].to_numpy()
+    def update_semi_auto_annotations(self, x, start, end, annotation_type: AnnotationType):
+        REF_SIGNAL = 'Th_Ref_Filt'
+
+        match annotation_type:
+            case AnnotationType.TH1:
+                FILTERED_SIGNAL = 'Th1_Filt'
+                PATCH_HEIGHT_PERCENTAGE = 0.05
+                REFERENCE_SEPARATION = 2
+                SEPARATION = 1
+                INTERVAL_RANGE_FALLOFF = 0.25
+                EPSILON = 0.25
+                VERTICAL_STRIPES = self.interval_vertical_stripes_th1
+                NEIGHBORHOOD_PATCHES = self.neighborhood_patches_th1
+                CORRECT_DIPS = self.correct_dips_th1
+                DANGEROUS_DIPS = self.dangerous_dips_th1
+            case AnnotationType.TH2:
+                FILTERED_SIGNAL = 'Th2_Filt'
+            case _:
+                return
+        
+        # region SETUP
+        ref_data_segment = self.DATA[REF_SIGNAL][start:end].to_numpy()
         if (len(ref_data_segment) == 0):
             n = 0
         else:
-            ref_dips_indices, _ = find_peaks(-ref_data_segment, distance=self.FS*reference_separation)
+            ref_dips_indices, _ = find_peaks(-ref_data_segment, distance=self.FS*REFERENCE_SEPARATION)
             n = len(ref_dips_indices)
 
-        data_segment = self.DATA['Th1_Filt'][start:end].to_numpy()
+        data_segment = self.DATA[FILTERED_SIGNAL][start:end].to_numpy()
         if (len(data_segment) == 0):
             return
         
-        minima_indices, _ = find_peaks(-data_segment, distance=self.FS*separation)
+        minima_indices, _ = find_peaks(-data_segment, distance=self.FS*SEPARATION)
         if (len(minima_indices) == 0):
             return
-        # --- END SETUP ---
+        # endregion
 
-        # --- PLOTTING REFERENCE DIP INTERVAL RANGES ---
+        # region PLOTTING REFERENCE DIP INTERVAL RANGES
         reference_minima_index_ranges = []
         for ref_dip_idx in ref_dips_indices:
-            start_range = ref_dip_idx - int(self.FS * reference_separation * interval_range_falloff)
+            start_range = ref_dip_idx - int(self.FS * REFERENCE_SEPARATION * INTERVAL_RANGE_FALLOFF)
             if (start_range < 0):
                 start_range = 0
-            end_range = ref_dip_idx + int(self.FS * reference_separation * interval_range_falloff)
+            end_range = ref_dip_idx + int(self.FS * REFERENCE_SEPARATION * INTERVAL_RANGE_FALLOFF)
             if (end_range >= len(data_segment)):
                 end_range = len(data_segment) - 1       
 
             reference_minima_index_ranges.append((start_range, end_range))
 
-        while self.interval_vertical_stripes_th1:
-            self.interval_vertical_stripes_th1.pop().remove()
+        while VERTICAL_STRIPES:
+            VERTICAL_STRIPES.pop().remove()
 
         for reference_range in reference_minima_index_ranges:
             stripe = self.canvas_th_1.axes.axvspan(
@@ -333,11 +356,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 zorder=0
                 )
             
-            self.interval_vertical_stripes_th1.append(stripe)
-        # --- END PLOTTING REFERENCE DIP INTERVAL RANGES ---
+            VERTICAL_STRIPES.append(stripe)
+        # endregion
 
-        # --- PLOTTING CRITICAL DIP POINTS ---
-        epsilon_y = epsilon * (np.max(data_segment) - np.min(data_segment))
+        # region PLOTTING CRITICAL DIP POINTS
+        epsilon_y = EPSILON * (np.max(data_segment) - np.min(data_segment))
 
         correct_minima_indices = []
         dangerous_minima_indices = []
@@ -347,21 +370,21 @@ class MainWindow(QtWidgets.QMainWindow):
             if (data_segment[idx] <= smallest_minimum_y + epsilon_y) and any(start_range <= idx <= end_range for (start_range, end_range) in reference_minima_index_ranges):
                 correct_minima_indices.append(idx)
             else:
-                dangerous_minima_indices.append(idx)            
+                dangerous_minima_indices.append(idx)
 
-        self.correct_dips_th1.set_data(x[correct_minima_indices], data_segment[correct_minima_indices])
-        self.dangerous_dips_th1.set_data(x[dangerous_minima_indices], data_segment[dangerous_minima_indices])
-        # --- END PLOTTING CRITICAL DIP POINTS ---
+        CORRECT_DIPS.set_data(x[correct_minima_indices], data_segment[correct_minima_indices])
+        DANGEROUS_DIPS.set_data(x[dangerous_minima_indices], data_segment[dangerous_minima_indices])
+        # endregion
 
-        # --- PLOTTING NEIGHBORHOOD PATCHES/BARS ---
+        # region PLOTTING NEIGHBORHOOD PATCHES/BARS
         minima_values = data_segment[minima_indices]
         sorted_minima_indices = np.argsort(minima_values)
 
-        while self.neighborhood_patches_th1:
-            self.neighborhood_patches_th1.pop().remove()
+        while NEIGHBORHOOD_PATCHES:
+            NEIGHBORHOOD_PATCHES.pop().remove()
 
         ymin, ymax = self.line_th_1.axes.get_ylim()
-        patch_size = (ymax - ymin) * patch_height_percentage
+        patch_size = (ymax - ymin) * PATCH_HEIGHT_PERCENTAGE
         n_patches = min(n, len(sorted_minima_indices))
         for i, min_value in enumerate(minima_values[sorted_minima_indices[:n_patches]]):
             patch_start = min_value - patch_size / 2
@@ -370,13 +393,13 @@ class MainWindow(QtWidgets.QMainWindow):
             patch = self.canvas_th_1.axes.axhspan(
                 patch_start,
                 patch_end,
-                color=colors[i%len(colors)],
+                color=f'C{i % 10}',
                 alpha=0.25,
                 zorder=0
                 )
 
-            self.neighborhood_patches_th1.append(patch)
-        # --- END PLOTTING NEIGHBORHOOD PATCHES/BARS ---
+            NEIGHBORHOOD_PATCHES.append(patch)
+        # endregion
 
     #   Redraw all plots
     def update_plot(self):
@@ -402,8 +425,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_limits(self.line_th_1.axes, self.DATA['Th1_Filt'], start, end, False)
         self.update_limits(self.line_th_2.axes, self.DATA['Th2_Filt'], start, end, False)
 
-        # Update Th1 semi-automatic annotation
-        self.update_th1_semi_auto_annotations(x, start, end)
+        # Update semi-automatic annotations TODO
+        self.update_semi_auto_annotations(x, start, end, AnnotationType.TH1)
 
         # Update shading of expiratory and inspiratory phases
         self.update_shading(x, start, end)
