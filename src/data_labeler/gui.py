@@ -125,6 +125,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas_th_2.axes.text(0.01, 0.95, 'Th 2 Filtered', ha='left', va='top', color='blue', fontsize = 10, transform=self.canvas_th_2.axes.transAxes)
         layout.addWidget(self.canvas_th_2, 31, 0, 10, 10)
 
+        # Variables for Th2 semi-automatic annotation
+        self.neighborhood_patches_th2 = []
+        self.interval_vertical_stripes_th2 = []
+        self.correct_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='o', linestyle='None', color='green', markersize=7.5, zorder=50)
+        self.dangerous_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='X', linestyle='None', color='red', markersize=10, zorder=100)
+
         # Buttons for navigating the signal
         pushbutton = QtWidgets.QPushButton('<')
         pushbutton.clicked.connect(self.on_prev)
@@ -297,21 +303,30 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def update_semi_auto_annotations(self, x, start, end, annotation_type: AnnotationType):
         REF_SIGNAL = 'Th_Ref_Filt'
+        PATCH_HEIGHT_PERCENTAGE = 0.05 # this value is strictly cosmetic !
+        REFERENCE_SEPARATION = 2
+        SEPARATION = 1
+        INTERVAL_RANGE_FALLOFF = 0.25
 
         match annotation_type:
             case AnnotationType.TH1:
-                FILTERED_SIGNAL = 'Th1_Filt'
-                PATCH_HEIGHT_PERCENTAGE = 0.05
-                REFERENCE_SEPARATION = 2
-                SEPARATION = 1
-                INTERVAL_RANGE_FALLOFF = 0.25
                 EPSILON = 0.25
+                FILTERED_SIGNAL = 'Th1_Filt'
+                SIGNAL_CANVAS = self.canvas_th_1
+                SIGNAL_LINE = self.line_th_1
                 VERTICAL_STRIPES = self.interval_vertical_stripes_th1
                 NEIGHBORHOOD_PATCHES = self.neighborhood_patches_th1
                 CORRECT_DIPS = self.correct_dips_th1
                 DANGEROUS_DIPS = self.dangerous_dips_th1
             case AnnotationType.TH2:
+                EPSILON = 0.35 #TODO adjust
                 FILTERED_SIGNAL = 'Th2_Filt'
+                SIGNAL_CANVAS = self.canvas_th_2
+                SIGNAL_LINE = self.line_th_2
+                VERTICAL_STRIPES = self.interval_vertical_stripes_th2
+                NEIGHBORHOOD_PATCHES = self.neighborhood_patches_th2
+                CORRECT_DIPS = self.correct_dips_th2
+                DANGEROUS_DIPS = self.dangerous_dips_th2
             case _:
                 return
         
@@ -348,7 +363,7 @@ class MainWindow(QtWidgets.QMainWindow):
             VERTICAL_STRIPES.pop().remove()
 
         for reference_range in reference_minima_index_ranges:
-            stripe = self.canvas_th_1.axes.axvspan(
+            stripe = SIGNAL_CANVAS.axes.axvspan(
                 x[reference_range[0]],
                 x[reference_range[1]],
                 color='lightgrey',
@@ -383,14 +398,14 @@ class MainWindow(QtWidgets.QMainWindow):
         while NEIGHBORHOOD_PATCHES:
             NEIGHBORHOOD_PATCHES.pop().remove()
 
-        ymin, ymax = self.line_th_1.axes.get_ylim()
+        ymin, ymax = SIGNAL_LINE.axes.get_ylim()
         patch_size = (ymax - ymin) * PATCH_HEIGHT_PERCENTAGE
         n_patches = min(n, len(sorted_minima_indices))
         for i, min_value in enumerate(minima_values[sorted_minima_indices[:n_patches]]):
             patch_start = min_value - patch_size / 2
             patch_end = min_value + patch_size / 2
 
-            patch = self.canvas_th_1.axes.axhspan(
+            patch = SIGNAL_CANVAS.axes.axhspan(
                 patch_start,
                 patch_end,
                 color=f'C{i % 10}',
@@ -425,8 +440,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_limits(self.line_th_1.axes, self.DATA['Th1_Filt'], start, end, False)
         self.update_limits(self.line_th_2.axes, self.DATA['Th2_Filt'], start, end, False)
 
-        # Update semi-automatic annotations TODO
+        # Update semi-automatic annotations
         self.update_semi_auto_annotations(x, start, end, AnnotationType.TH1)
+        self.update_semi_auto_annotations(x, start, end, AnnotationType.TH2)
 
         # Update shading of expiratory and inspiratory phases
         self.update_shading(x, start, end)
