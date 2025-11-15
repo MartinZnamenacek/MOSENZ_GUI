@@ -82,6 +82,15 @@ class MainWindow(QtWidgets.QMainWindow):
         line.setFrameShadow(QtWidgets.QFrame.Raised)
         layout.addWidget(line, x, y, 2, 2)
 
+    def set_label_style(self, label, value):
+        color = 'transparent'
+        if value == 1:
+            color = 'lightgreen'
+        elif value == 0:
+            color = 'lightcoral'
+        
+        label.setStyleSheet(f'QLabel {{ background-color: {color}; }}')
+
     #   Define layout elements
     def create_layout(self):
         width, height = 12, 5
@@ -157,8 +166,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.seg_label.setFixedWidth(150)
         layout.addWidget(self.seg_label, 2, 11, 2, 2)
 
-        self.label = QtWidgets.QLabel('Confident:')
-        layout.addWidget(self.label, 4, 11, 2, 2)
+        self.label_conf = QtWidgets.QLabel('Confident:')
+        layout.addWidget(self.label_conf, 4, 11, 2, 2)
 
         # Segment toggle buttons
         self.radio_seg_yes = QtWidgets.QRadioButton('Yes')
@@ -179,8 +188,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # ------------- Reference ------------- 
         # Signal label
-        self.label = QtWidgets.QLabel('Reference visible:')
-        layout.addWidget(self.label, 12, 11, 2, 2)
+        self.label_ref = QtWidgets.QLabel('Reference visible:')
+        layout.addWidget(self.label_ref, 12, 11, 2, 2)
 
         # Signal toggle buttons
         self.radio_ref_yes = QtWidgets.QRadioButton('Yes')
@@ -201,8 +210,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ------------- Signal 1 --------------
         # Signal label
-        self.label = QtWidgets.QLabel('Signal visible:')
-        layout.addWidget(self.label, 22, 11, 2, 2)
+        self.label_sig1 = QtWidgets.QLabel('Signal visible:')
+        layout.addWidget(self.label_sig1, 22, 11, 2, 2)
 
         # Signaltoggle buttons
         self.radio_sig1_yes = QtWidgets.QRadioButton('Yes')
@@ -222,8 +231,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # ------------------------------------- 
 
         # ------------- Signal 2 --------------
-        self.label = QtWidgets.QLabel('Signal visible:')
-        layout.addWidget(self.label, 32, 11, 2, 2)
+        self.label_sig2 = QtWidgets.QLabel('Signal visible:')
+        layout.addWidget(self.label_sig2, 32, 11, 2, 2)
 
         # Signal toggle buttons
         self.radio_sig2_yes = QtWidgets.QRadioButton('Yes')
@@ -463,10 +472,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.seg_label.setText('SEGMENT ' + str(self.seg_curr + 1) + ' / ' + str(math.floor(len(self.DATA) / seg_len_pts)))
         
         # Update selection of radio buttons
-        self.update_selection(self.radio_seg_yes, self.radio_seg_no, self.dh.get_column_value(self.seg_curr, 'Confidence'))
-        self.update_selection(self.radio_ref_yes, self.radio_ref_no, self.dh.get_column_value(self.seg_curr, 'Reference'))
-        self.update_selection(self.radio_sig1_yes, self.radio_sig1_no, self.dh.get_column_value(self.seg_curr, 'Signal_1'))
-        self.update_selection(self.radio_sig2_yes, self.radio_sig2_no, self.dh.get_column_value(self.seg_curr, 'Signal_2'))
+        conf_val = self.dh.get_column_value(self.seg_curr, 'Confidence')
+        self.update_selection(self.radio_seg_yes, self.radio_seg_no, conf_val)
+        self.set_label_style(self.label_conf, conf_val)
+
+        ref_val = self.dh.get_column_value(self.seg_curr, 'Reference')
+        self.update_selection(self.radio_ref_yes, self.radio_ref_no, ref_val)
+        self.set_label_style(self.label_ref, ref_val)
+        
+        sig1_val = self.dh.get_column_value(self.seg_curr, 'Signal_1')
+        self.update_selection(self.radio_sig1_yes, self.radio_sig1_no, sig1_val)
+        self.set_label_style(self.label_sig1, sig1_val)
+        
+        sig2_val = self.dh.get_column_value(self.seg_curr, 'Signal_2')
+        self.update_selection(self.radio_sig2_yes, self.radio_sig2_no, sig2_val)
+        self.set_label_style(self.label_sig2, sig2_val)
 
      #   Update radio button selection based on data
     def update_selection(self, radio_yes, radio_no, data):
@@ -488,6 +508,16 @@ class MainWindow(QtWidgets.QMainWindow):
             radio_button = self.sender()
             if radio_button.isChecked():
                 self.dh.set_column_value(self.seg_curr, radio_button.label, column)
+
+                value = radio_button.label
+                if column == 'Confidence':
+                    self.set_label_style(self.label_conf, value)
+                elif column == 'Reference':
+                    self.set_label_style(self.label_ref, value)
+                elif column == 'Signal_1':
+                    self.set_label_style(self.label_sig1, value)
+                elif column == 'Signal_2':
+                    self.set_label_style(self.label_sig2, value)
 
     #   Handle next button keypress
     def on_next(self):
