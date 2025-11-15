@@ -117,7 +117,7 @@ class DataHandler():
         # labels = round(labels.rolling(window=250, center=True).mean())
 
         self.df_in['Phase'] = labels
-        self.df_in['Phase'] = self.df_in['Phase'].fillna(method='bfill')
+        self.df_in['Phase'] = self.df_in['Phase'].bfill()
 
     #   Define Butterworth filter for filtering out high frequency noise
     def butter_lowpass_filter(self, data, cutoff, fs, order=4):
