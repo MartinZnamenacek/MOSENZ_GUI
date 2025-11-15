@@ -430,7 +430,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 patch_start,
                 patch_end,
                 color=f'C{i % 10}',
-                alpha=0.25,
+                alpha=0.175,
                 zorder=0
                 )
 
