@@ -115,8 +115,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Variables for Th1 semi-automatic annotation
         self.neighborhood_patches_th1 = []
         self.interval_vertical_stripes_th1 = []
-        self.correct_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='o', linestyle='None', color='green', markersize=7.5, zorder=50)
+        self.correct_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='P', linestyle='None', color='darkgreen', markersize=10, zorder=50)
         self.dangerous_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='X', linestyle='None', color='red', markersize=10, zorder=100)
+        self.dubious_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='$?!$', linestyle='None', color='black', markersize=10, zorder=25)
 
         # Matplotlib canvas for the Th 2 signal
         self.canvas_th_2 = MplCanvas(self, width, height)
@@ -128,8 +129,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Variables for Th2 semi-automatic annotation
         self.neighborhood_patches_th2 = []
         self.interval_vertical_stripes_th2 = []
-        self.correct_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='o', linestyle='None', color='green', markersize=7.5, zorder=50)
+        self.correct_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='P', linestyle='None', color='darkgreen', markersize=10, zorder=50)
         self.dangerous_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='X', linestyle='None', color='red', markersize=10, zorder=100)
+        self.dubious_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='$?!$', linestyle='None', color='black', markersize=10, zorder=25)
 
         # Buttons for navigating the signal
         pushbutton = QtWidgets.QPushButton('<')
@@ -307,6 +309,8 @@ class MainWindow(QtWidgets.QMainWindow):
         REFERENCE_SEPARATION = 2
         SEPARATION = 1
         INTERVAL_RANGE_FALLOFF = 0.25
+        DUBIOUS_RANGE = (0.375, 0.55)
+        IGNORE_EDGE_DIPS_THRESHOLD = 0.05
 
         match annotation_type:
             case AnnotationType.TH1:
@@ -318,8 +322,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 NEIGHBORHOOD_PATCHES = self.neighborhood_patches_th1
                 CORRECT_DIPS = self.correct_dips_th1
                 DANGEROUS_DIPS = self.dangerous_dips_th1
+                DUBIOUS_DIPS = self.dubious_dips_th1
             case AnnotationType.TH2:
-                EPSILON = 0.35 #TODO adjust
+                EPSILON = 0.3 #TODO adjust
                 FILTERED_SIGNAL = 'Th2_Filt'
                 SIGNAL_CANVAS = self.canvas_th_2
                 SIGNAL_LINE = self.line_th_2
@@ -327,6 +332,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 NEIGHBORHOOD_PATCHES = self.neighborhood_patches_th2
                 CORRECT_DIPS = self.correct_dips_th2
                 DANGEROUS_DIPS = self.dangerous_dips_th2
+                DUBIOUS_DIPS = self.dubious_dips_th2
             case _:
                 return
         
@@ -375,20 +381,26 @@ class MainWindow(QtWidgets.QMainWindow):
         # endregion
 
         # region PLOTTING CRITICAL DIP POINTS
-        epsilon_y = EPSILON * (np.max(data_segment) - np.min(data_segment))
-
+        range_y = np.max(data_segment) - np.min(data_segment)
+        epsilon_y = EPSILON * range_y
+    
         correct_minima_indices = []
         dangerous_minima_indices = []
+        dubious_minima_indices = []
 
         smallest_minimum_y = np.min(data_segment[minima_indices])
         for idx in minima_indices:
             if (data_segment[idx] <= smallest_minimum_y + epsilon_y) and any(start_range <= idx <= end_range for (start_range, end_range) in reference_minima_index_ranges):
                 correct_minima_indices.append(idx)
             else:
-                dangerous_minima_indices.append(idx)
+                if data_segment[idx] < smallest_minimum_y + DUBIOUS_RANGE[0] * range_y and (idx >= IGNORE_EDGE_DIPS_THRESHOLD * len(data_segment)) and (idx < (1 - IGNORE_EDGE_DIPS_THRESHOLD) * len(data_segment)):
+                    dangerous_minima_indices.append(idx)
+                elif data_segment[idx] < smallest_minimum_y + DUBIOUS_RANGE[1] * range_y:
+                    dubious_minima_indices.append(idx)
 
         CORRECT_DIPS.set_data(x[correct_minima_indices], data_segment[correct_minima_indices])
         DANGEROUS_DIPS.set_data(x[dangerous_minima_indices], data_segment[dangerous_minima_indices])
+        DUBIOUS_DIPS.set_data(x[dubious_minima_indices], data_segment[dubious_minima_indices])
         # endregion
 
         # region PLOTTING NEIGHBORHOOD PATCHES/BARS
