@@ -116,7 +116,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Matplotlib canvas for the Th 1 signal
         self.canvas_th_1 = MplCanvas(self, width, height)
-        self.line_th_1, = self.canvas_th_1.axes.plot([], [], linewidth=0.8, color='blue')
+        self.line_th_1, = self.canvas_th_1.axes.plot([], [], linewidth=2.5, color='darkblue')
 
         self.canvas_th_1.axes.text(0.01, 0.95, 'Th 1 Filtered', ha='left', va='top', color='blue', fontsize = 10, transform=self.canvas_th_1.axes.transAxes)
         layout.addWidget(self.canvas_th_1, 21, 0, 10, 10)
@@ -130,7 +130,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Matplotlib canvas for the Th 2 signal
         self.canvas_th_2 = MplCanvas(self, width, height)
-        self.line_th_2, = self.canvas_th_2.axes.plot([], [], linewidth=0.8, color='blue')
+        self.line_th_2, = self.canvas_th_2.axes.plot([], [], linewidth=2.5, color='darkblue')
 
         self.canvas_th_2.axes.text(0.01, 0.95, 'Th 2 Filtered', ha='left', va='top', color='blue', fontsize = 10, transform=self.canvas_th_2.axes.transAxes)
         layout.addWidget(self.canvas_th_2, 31, 0, 10, 10)
@@ -287,8 +287,8 @@ class MainWindow(QtWidgets.QMainWindow):
         inspiration_mask = (self.DATA[start:end]['Phase'] == 1)
         expiration_mask = (self.DATA[start:end]['Phase'] == 0)
 
-        #self.line_th_ref.axes.patches.clear()
-        while self.line_th_ref.axes.patches: self.line_th_ref.axes.patches[0].remove()
+        for collection in list(self.line_th_ref.axes.collections):
+            collection.remove()
 
         y_min, _ = self.line_th_ref.axes.get_ylim()
 
@@ -298,8 +298,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                                y1=y_min,
                                                y2=self.DATA['Th_Ref_Filt'][start:end], 
                                                where=inspiration_mask, 
-                                               color='lightblue', 
-                                               alpha=0.7, 
+                                               color='green', 
+                                               alpha=0.9, 
                                                edgecolor='none')
 
         # Plot shading for Expiration (0)
@@ -308,8 +308,8 @@ class MainWindow(QtWidgets.QMainWindow):
                                                y1=y_min,
                                                y2=self.DATA['Th_Ref_Filt'][start:end], 
                                                where=expiration_mask, 
-                                               color='mistyrose', 
-                                               alpha=0.7,
+                                               color='red', 
+                                               alpha=0.9,
                                                edgecolor='none')
 
     def update_semi_auto_annotations(self, x, start, end, annotation_type: AnnotationType):
