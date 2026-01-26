@@ -5,6 +5,7 @@ __copyright__   = "Copyright 2025, FBMI CVUT"
 
 import math 
 import sys
+from tracemalloc import start
 
 import matplotlib as plt
 import numpy as np
@@ -64,7 +65,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.on_toggle(self.radio_sig1_yes, self.radio_sig1_no)
         elif event.key() == QtCore.Qt.Key_3:
             self.on_toggle(self.radio_sig2_yes, self.radio_sig2_no)
-        elif event.key() == QtCore.Qt.Key_Space:
+        elif event.key() == QtCore.Qt.Key_C:
             self.on_toggle(self.radio_seg_yes, self.radio_seg_no)
         elif event.key() == QtCore.Qt.Key_Enter or event.key() == QtCore.Qt.Key_Return:
             sys.exit()
@@ -127,6 +128,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.correct_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='P', linestyle='None', color='darkgreen', markersize=10, zorder=50)
         self.dangerous_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='X', linestyle='None', color='red', markersize=10, zorder=100)
         self.dubious_dips_th1, = self.canvas_th_1.axes.plot([], [], marker='$?!$', linestyle='None', color='black', markersize=10, zorder=25)
+        self.trend_lines_th1 = []
 
         # Matplotlib canvas for the Th 2 signal
         self.canvas_th_2 = MplCanvas(self, width, height)
@@ -141,6 +143,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.correct_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='P', linestyle='None', color='darkgreen', markersize=10, zorder=50)
         self.dangerous_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='X', linestyle='None', color='red', markersize=10, zorder=100)
         self.dubious_dips_th2, = self.canvas_th_2.axes.plot([], [], marker='$?!$', linestyle='None', color='black', markersize=10, zorder=25)
+        self.trend_lines_th2 = []
 
         # Buttons for navigating the signal
         pushbutton = QtWidgets.QPushButton('<')
@@ -313,129 +316,314 @@ class MainWindow(QtWidgets.QMainWindow):
                                                edgecolor='none')
 
     def update_semi_auto_annotations(self, x, start, end, annotation_type: AnnotationType):
-        REF_SIGNAL = 'Th_Ref_Filt'
-        PATCH_HEIGHT_PERCENTAGE = 0.05 # this value is strictly cosmetic !
-        REFERENCE_SEPARATION = 2
-        SEPARATION = 1
-        INTERVAL_RANGE_FALLOFF = 0.25
-        DUBIOUS_RANGE = (0.375, 0.55)
-        IGNORE_EDGE_DIPS_THRESHOLD = 0.05
+        EXPIRATION_LENGTH = 0.85
+        INSPIRATION_LENGTH = 0.2
+        DIP_SEPARATION = .15
+        REQUIRED_AMPLITUDE_PERCENTAGE = 0.05 
 
         match annotation_type:
             case AnnotationType.TH1:
-                EPSILON = 0.25
                 FILTERED_SIGNAL = 'Th1_Filt'
                 SIGNAL_CANVAS = self.canvas_th_1
-                SIGNAL_LINE = self.line_th_1
                 VERTICAL_STRIPES = self.interval_vertical_stripes_th1
-                NEIGHBORHOOD_PATCHES = self.neighborhood_patches_th1
+                TREND_LINES = self.trend_lines_th1 
                 CORRECT_DIPS = self.correct_dips_th1
                 DANGEROUS_DIPS = self.dangerous_dips_th1
-                DUBIOUS_DIPS = self.dubious_dips_th1
+                DUBIOUS_POINTS = self.dubious_dips_th1 
             case AnnotationType.TH2:
-                EPSILON = 0.3 #TODO adjust
                 FILTERED_SIGNAL = 'Th2_Filt'
                 SIGNAL_CANVAS = self.canvas_th_2
-                SIGNAL_LINE = self.line_th_2
                 VERTICAL_STRIPES = self.interval_vertical_stripes_th2
-                NEIGHBORHOOD_PATCHES = self.neighborhood_patches_th2
+                TREND_LINES = self.trend_lines_th2 
                 CORRECT_DIPS = self.correct_dips_th2
                 DANGEROUS_DIPS = self.dangerous_dips_th2
-                DUBIOUS_DIPS = self.dubious_dips_th2
+                DUBIOUS_POINTS = self.dubious_dips_th2
             case _:
                 return
         
-        # region SETUP
-        ref_data_segment = self.DATA[REF_SIGNAL][start:end].to_numpy()
-        if (len(ref_data_segment) == 0):
-            n = 0
-        else:
-            ref_dips_indices, _ = find_peaks(-ref_data_segment, distance=self.FS*REFERENCE_SEPARATION)
-            n = len(ref_dips_indices)
+        # get unclapmed reference subset
+        total_data_len = len(self.DATA)
+        visible_length = end - start
 
-        data_segment = self.DATA[FILTERED_SIGNAL][start:end].to_numpy()
-        if (len(data_segment) == 0):
-            return
+        safe_start = max(0, start - 2 * visible_length)
+        safe_end = min(total_data_len, end + 2 * visible_length)
+        subset = self.DATA['Phase'].iloc[safe_start : safe_end]
         
-        minima_indices, _ = find_peaks(-data_segment, distance=self.FS*SEPARATION)
-        if (len(minima_indices) == 0):
-            return
-        # endregion
+        transition_indices = subset.index[subset.diff() == 1].tolist()
+        reference_peaks = subset.index[subset.diff() == -1].tolist()
 
-        # region PLOTTING REFERENCE DIP INTERVAL RANGES
-        reference_minima_index_ranges = []
-        for ref_dip_idx in ref_dips_indices:
-            start_range = ref_dip_idx - int(self.FS * REFERENCE_SEPARATION * INTERVAL_RANGE_FALLOFF)
-            if (start_range < 0):
-                start_range = 0
-            end_range = ref_dip_idx + int(self.FS * REFERENCE_SEPARATION * INTERVAL_RANGE_FALLOFF)
-            if (end_range >= len(data_segment)):
-                end_range = len(data_segment) - 1       
+        # determine reference phase transitions within and around the visible range
+        prev_candidates = [t for t in transition_indices if t < start]
+        closest_prev = [prev_candidates[-1]] if prev_candidates else []
+        curr_candidates = [t for t in transition_indices if start <= t < end]
+        next_candidates = [t for t in transition_indices if t >= end]
+        closest_next = [next_candidates[0]] if next_candidates else []
 
-            reference_minima_index_ranges.append((start_range, end_range))
+        reference_dips = closest_prev + curr_candidates + closest_next
 
+        # get reference ranges for predicted expiration (dips) and inspiration (peaks)
+        reference_ranges_dips = []
+        for dip in reference_dips:
+            preceding_peaks = [p for p in reference_peaks if p < dip]
+            closest_preceding_peak = preceding_peaks[-1] if preceding_peaks else safe_start
+            following_peaks = [p for p in reference_peaks if p > dip]
+            closest_following_peak = following_peaks[0] if following_peaks else safe_end - 1
+
+            expiration_length = dip - closest_preceding_peak
+            inspiration_length = closest_following_peak - dip
+
+            r_start = int(dip - expiration_length * EXPIRATION_LENGTH) - start
+            r_end = int(dip + inspiration_length * INSPIRATION_LENGTH) - start
+            reference_ranges_dips.append((r_start, r_end))
+
+        reference_ranges_peaks = []
+        if reference_ranges_dips:
+            reference_ranges_dips.sort(key=lambda x: x[0])
+            for i in range(len(reference_ranges_dips) - 1):
+                d_curr_end = reference_ranges_dips[i][1]
+                d_next_start = reference_ranges_dips[i+1][0]
+                if d_curr_end < d_next_start:
+                    reference_ranges_peaks.append((d_curr_end, d_next_start))
+
+        # clean up signals for fresh plotting
         while VERTICAL_STRIPES:
             VERTICAL_STRIPES.pop().remove()
+        
+        while TREND_LINES:
+            TREND_LINES.pop().remove()
 
-        for reference_range in reference_minima_index_ranges:
-            stripe = SIGNAL_CANVAS.axes.axvspan(
-                x[reference_range[0]],
-                x[reference_range[1]],
-                color='lightgrey',
-                alpha=0.5,
-                zorder=0
-                )
+        # draw vertical stripes for predicted reference phases (expiration/inspiration)
+        def plot_stripes(ranges, color):
+            for r_start, r_end in ranges:
+                draw_start = max(0, min(visible_length - 1, r_start))
+                draw_end = max(0, min(visible_length - 1, r_end))
+                if draw_start < draw_end:
+                    stripe = SIGNAL_CANVAS.axes.axvspan(
+                        x[draw_start], x[draw_end],
+                        color=color, alpha=0.15, zorder=0
+                    )
+                    VERTICAL_STRIPES.append(stripe)
+
+        plot_stripes(reference_ranges_dips, 'red')
+        plot_stripes(reference_ranges_peaks, 'green')
+
+        if not reference_ranges_dips and not reference_ranges_peaks:
+            return
+
+        # slice the relevant signal data for processing
+        all_starts = [r[0] for r in reference_ranges_dips + reference_ranges_peaks]
+        all_ends = [r[1] for r in reference_ranges_dips + reference_ranges_peaks]
+
+        if not all_starts: return
+
+        min_rel_idx = min(all_starts)
+        max_rel_idx = max(all_ends)
+
+        abs_search_start = max(0, start + min_rel_idx)
+        abs_search_end = min(total_data_len, start + max_rel_idx + 1)
+        window_offset = abs_search_start - start 
+
+        process_data = self.DATA[FILTERED_SIGNAL].iloc[abs_search_start : abs_search_end].to_numpy()
+        if len(process_data) == 0: return
+
+        # analyze trend lines (monotony) within each reference range and plot them
+        def analyze_and_plot_trend(ranges, expected_trend):
+            for r_start, r_end in ranges:
+                idx_start = max(0, r_start - window_offset)
+                idx_end = min(len(process_data), r_end - window_offset + 1)
+                
+                if idx_end - idx_start < 2: 
+                    continue
+
+                y_segment = process_data[idx_start:idx_end]
+                x_segment = np.arange(len(y_segment)) 
+                
+                slope, intercept = np.polyfit(x_segment, y_segment, 1)
+
+                is_valid = False
+                if expected_trend == 'down':
+                    if slope <= 0: is_valid = True
+                else:
+                    if slope >= 0: is_valid = True
+                
+                line_color = 'green' if is_valid else 'red'
+                
+                draw_idx_start = max(0, min(visible_length - 1, r_start))
+                draw_idx_end = max(0, min(visible_length - 1, r_end))
+
+                if draw_idx_start < draw_idx_end:
+                    local_idx_start = (draw_idx_start - r_start) if r_start < 0 else 0
+                    local_idx_end = (len(y_segment) - 1) - ((r_end) - draw_idx_end) if r_end >= visible_length else (len(y_segment) - 1)
+                    
+                    draw_y_start = slope * local_idx_start + intercept
+                    draw_y_end = slope * local_idx_end + intercept
+
+                    if (line_color == 'green'): continue 
+
+                    line, = SIGNAL_CANVAS.axes.plot(
+                        [x[draw_idx_start], x[draw_idx_end]], 
+                        [draw_y_start, draw_y_end],
+                        color=line_color, linewidth=3, linestyle='--', alpha=0.9
+                    )
+                    TREND_LINES.append(line)
+
+        analyze_and_plot_trend(reference_ranges_dips, 'down')
+        analyze_and_plot_trend(reference_ranges_peaks, 'up')
+
+        # find local extrema within and around the segment
+        seg_min = np.min(process_data)
+        seg_max = np.max(process_data)
+        dynamic_threshold = (seg_max - seg_min) * REQUIRED_AMPLITUDE_PERCENTAGE
+
+        found_dips, _ = find_peaks(-process_data, distance=self.FS*DIP_SEPARATION)
+        found_peaks, _ = find_peaks(process_data, distance=self.FS*DIP_SEPARATION)
+
+        selected_points_expiration = [] 
+        selected_points_inspiration = [] 
+
+        def get_rel_idx(idx_in_window):
+            return idx_in_window + window_offset
+
+        # process expiration (dips) selecting the lowest dip in each reference range, defaulting to local min if none found
+        for r_start, r_end in reference_ranges_dips:
+            candidates = []
+            for idx in found_dips:
+                rel_idx = get_rel_idx(idx)
+                if r_start <= rel_idx <= r_end:
+                    candidates.append(idx)
             
-            VERTICAL_STRIPES.append(stripe)
-        # endregion
-
-        # region PLOTTING CRITICAL DIP POINTS
-        range_y = np.max(data_segment) - np.min(data_segment)
-        epsilon_y = EPSILON * range_y
-    
-        correct_minima_indices = []
-        dangerous_minima_indices = []
-        dubious_minima_indices = []
-
-        smallest_minimum_y = np.min(data_segment[minima_indices])
-        for idx in minima_indices:
-            if (data_segment[idx] <= smallest_minimum_y + epsilon_y) and any(start_range <= idx <= end_range for (start_range, end_range) in reference_minima_index_ranges):
-                correct_minima_indices.append(idx)
+            if candidates:
+                best_internal = min(candidates, key=lambda i: process_data[i])
+                best_rel = get_rel_idx(best_internal)
+                val = process_data[best_internal]
             else:
-                if data_segment[idx] < smallest_minimum_y + DUBIOUS_RANGE[0] * range_y and (idx >= IGNORE_EDGE_DIPS_THRESHOLD * len(data_segment)) and (idx < (1 - IGNORE_EDGE_DIPS_THRESHOLD) * len(data_segment)):
-                    dangerous_minima_indices.append(idx)
-                elif data_segment[idx] < smallest_minimum_y + DUBIOUS_RANGE[1] * range_y:
-                    dubious_minima_indices.append(idx)
+                s_start = max(0, r_start - window_offset)
+                s_end = min(len(process_data), r_end - window_offset + 1)
+                
+                if s_start < s_end:
+                    local_min_idx = np.argmin(process_data[s_start:s_end])
+                    best_internal = s_start + local_min_idx
+                    best_rel = get_rel_idx(best_internal)
+                    val = process_data[best_internal]
+                else:
+                    continue
+            
+            selected_points_expiration.append((best_rel, val))
 
-        CORRECT_DIPS.set_data(x[correct_minima_indices], data_segment[correct_minima_indices])
-        DANGEROUS_DIPS.set_data(x[dangerous_minima_indices], data_segment[dangerous_minima_indices])
-        DUBIOUS_DIPS.set_data(x[dubious_minima_indices], data_segment[dubious_minima_indices])
-        # endregion
+        # process inspiration (peaks) selecting the highest peak in each reference range, defaulting to local max if none found
+        for r_start, r_end in reference_ranges_peaks:
+            candidates = []
+            for idx in found_peaks:
+                rel_idx = get_rel_idx(idx)
+                if r_start <= rel_idx <= r_end:
+                    candidates.append(idx)
+            
+            if candidates:
+                best_internal = max(candidates, key=lambda i: process_data[i])
+                best_rel = get_rel_idx(best_internal)
+                val = process_data[best_internal]
+            else:
+                s_start = max(0, r_start - window_offset)
+                s_end = min(len(process_data), r_end - window_offset + 1)
 
-        # region PLOTTING NEIGHBORHOOD PATCHES/BARS
-        minima_values = data_segment[minima_indices]
-        sorted_minima_indices = np.argsort(minima_values)
+                if s_start < s_end:
+                    local_max_idx = np.argmax(process_data[s_start:s_end])
+                    best_internal = s_start + local_max_idx
+                    best_rel = get_rel_idx(best_internal)
+                    val = process_data[best_internal]
+                else:
+                    continue
 
-        while NEIGHBORHOOD_PATCHES:
-            NEIGHBORHOOD_PATCHES.pop().remove()
+            selected_points_inspiration.append((best_rel, val))
 
-        ymin, ymax = SIGNAL_LINE.axes.get_ylim()
-        patch_size = (ymax - ymin) * PATCH_HEIGHT_PERCENTAGE
-        n_patches = min(n, len(sorted_minima_indices))
-        for i, min_value in enumerate(minima_values[sorted_minima_indices[:n_patches]]):
-            patch_start = min_value - patch_size / 2
-            patch_end = min_value + patch_size / 2
+        # pair extrema points and categorize them as correct, or wrong
+        all_points = sorted(
+            [(i, v, True) for i, v in selected_points_expiration] + 
+            [(i, v, False) for i, v in selected_points_inspiration],
+            key=lambda x: x[0]
+        )
 
-            patch = SIGNAL_CANVAS.axes.axhspan(
-                patch_start,
-                patch_end,
-                color=f'C{i % 10}',
-                alpha=0.175,
-                zorder=0
-                )
+        correct_points = []
+        wrong_points = []
 
-            NEIGHBORHOOD_PATCHES.append(patch)
-        # endregion
+        for k in range(0, len(all_points) - 1):
+            p1 = all_points[k]
+            p2 = all_points[k+1]
+            
+            is_valid = False
+            
+            if p1[2] != p2[2]: 
+                val_dip = p1[1] if p1[2] else p2[1]
+                val_peak = p2[1] if p1[2] else p1[1]
+
+                if (val_peak - val_dip) > dynamic_threshold:
+                    is_valid = True
+            
+            if is_valid:
+                correct_points.append((p1[0], p1[1]))
+                correct_points.append((p2[0], p2[1]))
+            else:
+                wrong_points.append((p1[0], p1[1]))
+                wrong_points.append((p2[0], p2[1]))
+
+        correct_points = list(set(correct_points))
+        wrong_points = list(set(wrong_points))
+
+        # identify dubious points (peaks too high in expiration, dips too low in inspiration)
+        dubious_points = []
+        
+        num_pairs = min(len(reference_ranges_dips), len(reference_ranges_peaks))
+
+        for i in range(num_pairs):
+            range_exp = reference_ranges_dips[i]
+            range_insp = reference_ranges_peaks[i]
+
+            # determine local min/max thresholds of expiration & inspiration for the current pair of reference ranges
+            s_exp_start = max(0, range_exp[0] - window_offset)
+            s_exp_end = min(len(process_data), range_exp[1] - window_offset + 1)
+            
+            if s_exp_start >= s_exp_end: continue
+            threshold_lowest_dip = np.min(process_data[s_exp_start:s_exp_end])
+
+            s_insp_start = max(0, range_insp[0] - window_offset)
+            s_insp_end = min(len(process_data), range_insp[1] - window_offset + 1)
+
+            if s_insp_start >= s_insp_end: continue
+            threshold_highest_peak = np.max(process_data[s_insp_start:s_insp_end])
+
+            # check for improper peaks in expiration (higher than the highest peak in relevant inspiration)
+            for idx in found_peaks:
+                rel_idx = get_rel_idx(idx)
+                if range_exp[0] <= rel_idx <= range_exp[1]:
+                    val = process_data[idx]
+                    if val > threshold_highest_peak:
+                        dubious_points.append((rel_idx, val))
+
+            # check for improper dips in inspiration (lower than the lowest dips in relevant expiration)
+            for idx in found_dips:
+                rel_idx = get_rel_idx(idx)
+                if range_insp[0] <= rel_idx <= range_insp[1]:
+                    val = process_data[idx]
+                    if val < threshold_lowest_dip:
+                        dubious_points.append((rel_idx, val))
+
+        # map filtered points to visible canvas coordinates and update plots to visualize them
+        def filter_and_map(points_list):
+            xs = []
+            ys = []
+            for idx, val in points_list:
+                if 0 <= idx < visible_length:
+                    xs.append(x[idx])
+                    ys.append(val)
+            return xs, ys
+
+        cx, cy = filter_and_map(correct_points)
+        wx, wy = filter_and_map(wrong_points)
+        dx, dy = filter_and_map(dubious_points)
+
+        CORRECT_DIPS.set_data(cx, cy)
+        DANGEROUS_DIPS.set_data(wx, wy)
+        DUBIOUS_POINTS.set_data(dx, dy)
 
     #   Redraw all plots
     def update_plot(self):
@@ -488,7 +676,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_selection(self.radio_sig2_yes, self.radio_sig2_no, sig2_val)
         self.set_label_style(self.label_sig2, sig2_val)
 
-     #   Update radio button selection based on data
+    #   Update radio button selection based on data
     def update_selection(self, radio_yes, radio_no, data):
         if data == radio_yes.label:
             radio_yes.setChecked(True)
